@@ -317,13 +317,13 @@ docs/
 ## Reproducing
 
 ```bash
-# default agent path (DFlash) + smoke test:
+# default: the dense profile (downloads the prebuilt hybrid) + smoke test:
 ./install.sh --start
-
-# the dense stack (downloads the prebuilt hybrid checkpoint):
-./install.sh --start --profile dense
 # (to build the hybrid checkpoint locally instead of downloading it:)
-#   ./install.sh --build-hybrid && ./install.sh --start --profile dense
+#   ./install.sh --build-hybrid && ./install.sh --start
+
+# plain-DFlash agent path (serves the Intel INT4 checkpoint, largest KV pool):
+./install.sh --start --profile dflash
 
 # benchmarks (run on the host against the server; requires: pip install requests):
 python3 scripts/bench_decode.py --base-url http://127.0.0.1:8000 --model qwen \
