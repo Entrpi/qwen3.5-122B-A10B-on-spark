@@ -24,6 +24,11 @@ GPU_MEM="${GPU_MEM:-0.82}"                     # VALIDATED: ~14 GiB free on 128 
 MAX_NUM_SEQS="${MAX_NUM_SEQS:-3}"             # 3 concurrent streams; KV pool ~457k tokens, 1.74x at full 262144
 MAX_BATCHED_TOKENS="${MAX_BATCHED_TOKENS:-8192}"  # chunked-prefill chunk (NOT = max-model-len)
 PORT="${PORT:-8000}"
+# Read straight to the device (no mmap, no host staging) — the slow default safetensors
+# read+copy is ~8 min on Spark; fastsafetensors cuts it to ~1 min. Falls back to nogds
+# automatically. Override LOAD_FORMAT=auto|safetensors if the pkg is absent (or set
+# --safetensors-load-strategy eager via SAFETENSORS_STRATEGY).
+LOAD_FORMAT="${LOAD_FORMAT:-fastsafetensors}"
 
 # FLA sm121 big-tile shmem fix (prefill/TTFT only on sm121; harmless, free).
 echo "[serve] FLA sm121 big-tile shmem patch"
@@ -57,5 +62,6 @@ exec vllm serve "$MODEL" \
   --no-enable-prefix-caching \
   --enable-chunked-prefill \
   --trust-remote-code \
+  --load-format "$LOAD_FORMAT" \
   --attention-backend "$BACKEND" \
   "${SPEC_ARG[@]}"
