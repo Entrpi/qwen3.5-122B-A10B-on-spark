@@ -53,7 +53,7 @@ REPO_DIR="${REPO_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && p
 REPO_URL="${REPO_URL:-https://github.com/Entrpi/qwen3.5-122B-A10B-on-spark.git}"
 
 NAME="${NAME:-qwen-spark}"
-PROFILE="dflash"                   # dflash | dense | base | mtp
+PROFILE="dense"                    # dense | dflash | base | mtp (dense = default; downloads the prebuilt hybrid)
 NSPEC=""                           # override num_speculative_tokens (default per profile)
 PORT="${PORT:-8000}"
 CTX="${CTX:-262144}"               # max-model-len: model native max (KV is ~24 KiB/token)
@@ -74,11 +74,10 @@ usage() {
 Usage: $0 [flags]
 
 Profiles (--profile):
-  dflash   INT4 target + DFlash drafter, n=12      (DEFAULT — best for agents/Hermes;
-                                                    ~81 tok/s on real tool-call turns)
-  dense    hybrid INT4+FP8 + int8 lm-head + DFlash  (the dense-bandwidth stack;
-                                                    +28% at base, +10% low-accept spec.
-                                                    Downloads a prebuilt hybrid checkpoint.)
+  dense    hybrid INT4+FP8 + int8 lm-head + DFlash  (DEFAULT — downloads a prebuilt hybrid
+                                                    checkpoint; +28% base, = dflash on agents)
+  dflash   INT4 target + DFlash drafter, n=12      (plain DFlash; ~81 tok/s on agent turns,
+                                                    largest KV pool)
   base     plain INT4, no speculative decode        (~28 tok/s c=1 baseline)
   mtp      INT4 + native MTP-2 head                  (the albond comparison path)
 

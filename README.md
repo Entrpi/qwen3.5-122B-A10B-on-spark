@@ -17,10 +17,13 @@ acceptance is task-dependent (it block-drafts 12 tokens in one parallel forward)
 so the gain is largest on structured / tool-call / code traffic and falls to
 parity on open-ended prose.
 
-A separate **dense-bandwidth stack** (hybrid INT4+FP8 shared experts + int8
-lm-head) adds **+28 % to no-spec / base decode** (28.2 → 36.0 tok/s) but, per the
-[amortization law](#the-amortization-law) below, falls to ~nil on high-acceptance
-agent traffic — it is a lever for base / low-acceptance serving, not the agent path.
+The default **`dense`** profile bundles a **dense-bandwidth stack** (hybrid
+INT4+FP8 shared experts + int8 lm-head) on top of DFlash, downloaded as a prebuilt
+checkpoint: **+28 % on no-spec / base decode** (28.2 → 36.0 tok/s) and equal to
+plain DFlash on high-acceptance agent traffic (per the
+[amortization law](#the-amortization-law) below), at a modestly smaller KV pool.
+The **`dflash`** profile drops the dense patches for the largest KV pool and the
+same ~81 tok/s on agents.
 
 - **Engine:** [`vLLM`](https://github.com/vllm-project/vllm) 0.23, sm121 build with the DFlash PRs, via the prebuilt image `ghcr.io/aeon-7/aeon-vllm-ultimate:2026-06-18-v0.23.0-dflashfix`. No host build — the four runtime patches in [`runtime/`](runtime/) are applied at serve time.
 - **Target:** [`Intel/Qwen3.5-122B-A10B-int4-AutoRound`](https://huggingface.co/Intel/Qwen3.5-122B-A10B-int4-AutoRound) — INT4 (AutoRound/GPTQ) routed experts + attention, BF16 shared experts / embeddings / head, ~62 GiB. Safetensors, *not* GGUF — vLLM serves the HF checkpoint directly.
@@ -82,24 +85,36 @@ and the activation reserve dominate the footprint, so the usable pool is far
 smaller than a KV-only estimate suggests. The values below are measured on the
 target hardware at the shipped defaults (`gpu-mem 0.82`, `ctx 262144`, `seqs 3`):
 
-| Measurement | Value |
+| Measurement (default `dense` profile) | Value |
 |---|---|
-| Free memory at READY | **~14 GiB** (responsive, no swap) |
-| GPU KV cache pool | **456,664 tokens** |
-| Max concurrency at full 262 144 | **1.74×** |
-| Concurrency 1 → 2 → 3 (prose) | per-stream **26.5 → 18.8 → 17.4** tok/s · aggregate **26.5 → 36.8 → 51.6** |
+| Free memory at READY | **~18 GiB** (responsive, no swap) |
+| GPU KV cache pool | **376,518 tokens** (`dflash` profile: 456,664) |
+| Max concurrency at full 262 144 | **1.44×** (`dflash`: 1.74×) |
+
+Decode-only throughput (streaming, excludes prefill), by workload and concurrency:
+
+| Workload | 1 stream | 2 streams | 3 streams | aggregate @ 3 |
+|---|---|---|---|---|
+| prose | 48.8 | 38.4 | 30.8 | 92.5 |
+| code | 66.9 | 55.3 | 43.0 | 129 |
+| agentic (real 6 k tool-call ctx) | 121.8 | 98.9 | 66.7 | 200 |
+
+(tok/s per stream; aggregate is the sum across streams. Each added stream lowers
+per-stream throughput and raises the aggregate. The single-context agentic 121.8
+exceeds the ~81 headline, which is the median over 10 varied real turns including
+longer, slower-prefilling contexts.)
 
 A typical load — three streams under ~100 k each (≈ <300 k tokens) — fits the
-456 k pool with margin, and a single stream can still reach the full 262 144
+376 k pool with margin, and a single stream can still reach the full 262 144
 context. At `gpu-mem` 0.88–0.89 the static footprint leaves only ~5 GiB free; the
-host then swaps and requests stall. `0.82` is the validated value (~14 GiB free).
-Defaults (override via flags or environment variables):
+host then swaps and requests stall. `0.82` is the validated value (~18 GiB free
+on `dense`). Defaults (override via flags or environment variables):
 
 | Flag / env | Default | Note |
 |---|---|---|
 | `--gpu-mem` / `GPU_MEM` | **0.82** | ~14 GiB free (validated); 0.88+ over-subscribes and swaps |
 | `--ctx` / `CTX` (`MAX_MODEL_LEN`) | **262144** | model native max; a single stream can reach any length up to this. Costs only KV-pool sizing — the CUDA-graph compile range tracks `max-batched-tokens`, not `ctx` |
-| `--max-num-seqs` / `MAX_NUM_SEQS` | **3** | concurrent-stream cap; the pool holds 1.74× a full-262 k context, ample for <100 k streams |
+| `--max-num-seqs` / `MAX_NUM_SEQS` | **3** | concurrent-stream cap; the pool holds ~1.4× (`dense`) / ~1.7× (`dflash`) a full-262 k context, ample for <100 k streams |
 | `--max-batched-tokens` / `MAX_BATCHED_TOKENS` | **8192** | chunked-prefill chunk, kept **below** `ctx` so a long prefill does not batch all at once |
 
 The default operating point is a single stream (no contention; ~81 tok/s on agent
@@ -120,8 +135,8 @@ Selected with `--profile`:
 
 | Profile | Stack | Best for | Measured |
 |---|---|---|---|
-| **`dflash`** *(default)* | INT4 + DFlash n=12 | agents / tool-calls / code | **~81 tok/s** Hermes · 53.7 albond-bench |
-| `dense` | hybrid INT4+FP8 + int8 lm-head + DFlash n=12 | base / low-acceptance serving | 36.0 base (+28%) · 59.0 albond-bench |
+| **`dense`** *(default)* | hybrid INT4+FP8 + int8 lm-head + DFlash n=12 | general — downloads the prebuilt hybrid; ≈ dflash on agents, +28% on base | 36.0 base (+28%) · 59.0 albond-bench · ~81 Hermes |
+| `dflash` | INT4 + DFlash n=12 | agent path; largest KV pool (456k vs 376k) | **~81 tok/s** Hermes · 53.7 albond-bench |
 | `base` | plain INT4, no speculative decode | airtight baseline | 28.2 tok/s c=1 |
 | `mtp` | INT4 + native MTP-2 head | comparison | ~40 tok/s Hermes |
 
