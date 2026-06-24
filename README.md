@@ -90,7 +90,7 @@ capped by the *model*, not memory. Defaults (override via flags/env):
 |---|---|---|
 | `--gpu-mem` / `GPU_MEM` | **0.89** | reserves ~14 GB; drop to 0.87 if the OOM-guard fires on first load |
 | `--ctx` / `CTX` (`MAX_MODEL_LEN`) | **262144** | model native max |
-| `--max-num-seqs` / `MAX_NUM_SEQS` | **1** | single-stream; raising it is nearly free (pool ≫ one context) |
+| `--max-num-seqs` / `MAX_NUM_SEQS` | **4** | ~5 sequences fit the full 262 144 context each (pool ÷ ctx); set higher for short-context concurrency (preempts if many grow long) |
 | `--max-batched-tokens` / `MAX_BATCHED_TOKENS` | **8192** | chunked-prefill chunk — kept **below** ctx so a long prefill doesn't batch all at once |
 
 > Unified-memory OOM **hard-freezes** the box, and vLLM's profiler can undershoot
