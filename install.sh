@@ -42,6 +42,7 @@ IMAGE="${QWEN_IMAGE:-ghcr.io/aeon-7/aeon-vllm-ultimate:2026-06-18-v0.23.0-dflash
 TARGET_REPO="${TARGET_REPO:-Intel/Qwen3.5-122B-A10B-int4-AutoRound}"   # INT4 target (~62 GiB)
 DRAFT_REPO="${DRAFT_REPO:-z-lab/Qwen3.5-122B-A10B-DFlash}"             # 0.8B drafter (~1.6 GiB)
 FP8_REPO="${FP8_REPO:-Qwen/Qwen3.5-122B-A10B-FP8}"                     # FP8 donor for --build-hybrid
+HYBRID_REPO="${HYBRID_REPO:-bleysg/Qwen3.5-122B-A10B-int4-fp8-hybrid}" # prebuilt hybrid; the dense profile downloads this (no local build)
 
 HF_HOME="${HF_HOME:-$HOME/.cache/huggingface}"
 HYBRID_DIR="${HYBRID_DIR:-$HOME/qwen3.5-122b-hybrid-int4-fp8}"
@@ -77,7 +78,7 @@ Profiles (--profile):
                                                     ~81 tok/s on real tool-call turns)
   dense    hybrid INT4+FP8 + int8 lm-head + DFlash  (the dense-bandwidth stack;
                                                     +28% at base, +10% low-accept spec.
-                                                    Needs --build-hybrid first.)
+                                                    Downloads a prebuilt hybrid checkpoint.)
   base     plain INT4, no speculative decode        (~28 tok/s c=1 baseline)
   mtp      INT4 + native MTP-2 head                  (the albond comparison path)
 
@@ -85,7 +86,8 @@ Flags:
   --help                  Show this help.
   --profile NAME          One of dflash|dense|base|mtp (default: dflash).
   --start                 Start the vLLM server + smoke test after setup.
-  --build-hybrid          Build the hybrid INT4+FP8 checkpoint (~20 min, needs FP8 donor).
+  --build-hybrid          Build the hybrid INT4+FP8 checkpoint locally (~20 min) instead of
+                          downloading the prebuilt one (dense downloads by default).
   --no-pull               Skip docker pull (use the local image).
   --no-download           Skip HF download (assume target+drafter already cached).
   --model-dir DIR         Use a pre-downloaded INT4 target checkpoint dir (skip its
@@ -101,7 +103,7 @@ Flags:
   --no-smoke              Start the server but skip the Paris smoke test.
 
 Environment equivalents:
-  QWEN_IMAGE TARGET_REPO DRAFT_REPO FP8_REPO HF_HOME HYBRID_DIR
+  QWEN_IMAGE TARGET_REPO DRAFT_REPO FP8_REPO HYBRID_REPO HF_HOME HYBRID_DIR
   NAME PORT CTX GPU_MEM MAX_NUM_SEQS MAX_BATCHED_TOKENS BACKEND REPO_DIR REPO_URL
 EOF
 }
@@ -198,10 +200,18 @@ hf_get() {  # repo -> populate HF cache via the image's huggingface_hub
 download_models() {
     if [[ "$SKIP_DOWNLOAD" -eq 1 ]]; then log "Skipping HF download (--no-download)."; return; fi
     mkdir -p "$HF_HOME"
+    local have_local_hybrid=0
+    [[ -f "$HYBRID_DIR/model.safetensors.index.json" ]] && have_local_hybrid=1
     if [[ -n "$MODEL_DIR" ]]; then
         [[ -f "$MODEL_DIR/config.json" ]] || die "--model-dir $MODEL_DIR has no config.json"
-        log "Using pre-downloaded target at $MODEL_DIR (skipping target download)."
+        log "Using pre-downloaded checkpoint at $MODEL_DIR (skipping download)."
+    elif [[ "$PROFILE" == "dense" && "$BUILD_HYBRID" -eq 0 && "$have_local_hybrid" -eq 0 ]]; then
+        log "Fetching prebuilt hybrid checkpoint $HYBRID_REPO into $HF_HOME ..."
+        hf_get "$HYBRID_REPO"
+    elif [[ "$PROFILE" == "dense" && "$have_local_hybrid" -eq 1 ]]; then
+        log "Using locally-built hybrid at $HYBRID_DIR (skipping download)."
     else
+        # dflash / base / mtp, or dense + --build-hybrid (the build pulls the FP8 donor itself)
         log "Fetching target $TARGET_REPO into $HF_HOME ..."
         hf_get "$TARGET_REPO"
     fi
@@ -261,9 +271,12 @@ start_server() {
     case "$PROFILE" in
         dflash) nspec="${NSPEC:-12}"; serve_args="$nspec $BACKEND" ;;
         dense)  nspec="${NSPEC:-12}"; serve_args="$nspec $BACKEND"
-                [[ -f "$HYBRID_DIR/model.safetensors.index.json" ]] || die "dense profile needs the hybrid ckpt — run with --build-hybrid first."
-                model_env=(-e MODEL=/model -e INC_HYBRID=1 -e INT8_LMHEAD_V3=1)
-                mounts=(-v "$HYBRID_DIR:/model:ro") ;;
+                if [[ -f "$HYBRID_DIR/model.safetensors.index.json" ]]; then
+                    model_env=(-e MODEL=/model -e INC_HYBRID=1 -e INT8_LMHEAD_V3=1)   # locally-built hybrid
+                    mounts=(-v "$HYBRID_DIR:/model:ro")
+                else
+                    model_env=(-e MODEL="$HYBRID_REPO" -e INC_HYBRID=1 -e INT8_LMHEAD_V3=1)  # prebuilt hybrid from the HF cache
+                fi ;;
         base)   nspec="${NSPEC:-0}"; serve_args="$nspec $BACKEND" ;;
         mtp)    nspec="${NSPEC:-2}"; serve_args="$nspec $BACKEND" ;;
     esac
