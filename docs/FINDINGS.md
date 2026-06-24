@@ -4,6 +4,13 @@ Single-stream (c=1) decode of `Qwen3.5-122B-A10B` (hybrid GDN + mamba + 128-expe
 MoE, ~10B active) on GB10 / SM121, 128 GiB unified, ~273 GB/s. The agent this
 backs (Hermes) is ~73 % tool-calls. All numbers temperature 0.
 
+> **Credit.** This builds on [albond's recipe](https://github.com/albond/DGX_Spark_Qwen3.5-122B-A10B-AR-INT4)
+> (hybrid INT4+FP8 + INT8 lm-head + MTP-2 on vLLM 0.19, and the e2e benchmark
+> method). The new work here is forward-porting the dense levers to vLLM 0.23,
+> swapping MTP for DFlash, and composing them — landing at **59.0 e2e tok/s vs
+> albond's 51.58** on his own harness (+14%), and ~2× on real agent traffic.
+> See README → *Building on the albond recipe* for the side-by-side.
+
 ## 1. Getting DFlash to run on the hybrid 122B in vLLM
 
 The DFlash drafter is **non-causal** (it block-drafts 16 tokens in one parallel
