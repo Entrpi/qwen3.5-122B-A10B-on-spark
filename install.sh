@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # install.sh — Qwen3.5-122B-A10B + DFlash speculative decode on NVIDIA DGX Spark
-#              (GB10 / SM121, 128 GiB unified), via vLLM in Docker.
+#              (GB10 / SM121, 128 GB / 119 GiB unified), via vLLM in Docker.
 #
 #   curl -sSL https://raw.githubusercontent.com/Entrpi/qwen3.5-122B-A10B-on-spark/main/install.sh | bash
 #   curl -sSL https://raw.githubusercontent.com/Entrpi/qwen3.5-122B-A10B-on-spark/main/install.sh | bash -s -- --help
@@ -92,7 +92,7 @@ Flags:
   --nspec N               num_speculative_tokens (default 12 dflash/dense, 2 mtp, 0 base).
   --port N                Server port (default: $PORT).
   --ctx N                 max-model-len (default: $CTX).
-  --gpu-mem F             gpu-memory-utilization, keep <=0.84 on 128GiB (default: $GPU_MEM).
+  --gpu-mem F             gpu-memory-utilization, keep <=0.84 on 128GB (default: $GPU_MEM).
   --force                 Skip the GB10/SM121 host check.
   --no-smoke              Start the server but skip the Paris smoke test.
 

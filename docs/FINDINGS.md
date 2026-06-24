@@ -1,7 +1,7 @@
 # FINDINGS — DFlash + dense levers for Qwen3.5-122B-A10B on DGX Spark
 
 Single-stream (c=1) decode of `Qwen3.5-122B-A10B` (hybrid GDN + mamba + 128-expert
-MoE, ~10B active) on GB10 / SM121, 128 GiB unified, ~273 GB/s. The agent this
+MoE, ~10B active) on GB10 / SM121, 128 GB / 119 GiB unified, ~273 GB/s. The agent this
 backs (Hermes) is ~73 % tool-calls. All numbers temperature 0.
 
 > **Credit.** This builds on [albond's recipe](https://github.com/albond/DGX_Spark_Qwen3.5-122B-A10B-AR-INT4)

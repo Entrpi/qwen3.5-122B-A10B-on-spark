@@ -2,7 +2,7 @@
 
 [`Qwen3.5-122B-A10B`](https://huggingface.co/Intel/Qwen3.5-122B-A10B-int4-AutoRound)
 (hybrid GDN + mamba + 128-expert MoE, ~10B active) running on a single
-**NVIDIA DGX Spark** (GB10 / SM121, 128 GiB unified) under **vLLM**, with
+**NVIDIA DGX Spark** (GB10 / SM121, 128 GB / 119 GiB unified) under **vLLM**, with
 **[DFlash](https://modal.com/blog/spec-is-all-u-need) block-diffusion speculative
 decode** and an optional **dense-bandwidth patch stack** — measured end-to-end,
 with a per-token bandwidth model that explains every number.
@@ -25,7 +25,7 @@ so it's a lever for *base / low-acceptance* serving, not for the agent path.
 - **Engine:** [`vLLM`](https://github.com/vllm-project/vllm) 0.23, sm121 build with the DFlash PRs, via the prebuilt image `ghcr.io/aeon-7/aeon-vllm-ultimate:2026-06-18-v0.23.0-dflashfix`. No host build — the four runtime patches in [`runtime/`](runtime/) are applied at serve time.
 - **Target:** [`Intel/Qwen3.5-122B-A10B-int4-AutoRound`](https://huggingface.co/Intel/Qwen3.5-122B-A10B-int4-AutoRound) — INT4 (AutoRound/GPTQ) routed experts + attention, BF16 shared experts/embeddings/head, ~62 GiB. (Safetensors, *not* GGUF — vLLM serves HF checkpoints directly.)
 - **Drafter:** [`z-lab/Qwen3.5-122B-A10B-DFlash`](https://huggingface.co/z-lab/Qwen3.5-122B-A10B-DFlash) — 0.8B / 6-layer non-causal block-diffusion drafter (block 16), shares the target's `embed_tokens` + `lm_head`, ~1.6 GiB.
-- **Hardware:** NVIDIA DGX Spark, GB10, SM121, 128 GiB LPDDR5X unified, ~273 GB/s.
+- **Hardware:** NVIDIA DGX Spark, GB10, SM121, 128 GB LPDDR5X unified (~119 GiB usable), ~273 GB/s.
 
 ## Quick start
 
@@ -58,12 +58,12 @@ Preview without running: `... | bash -s -- --help`.
 
 | | |
 |---|---|
-| Validated on | NVIDIA DGX Spark (GB10, SM121, 128 GiB unified) |
+| Validated on | NVIDIA DGX Spark (GB10, SM121, 128 GB / 119 GiB unified) |
 | Likely to work | other Blackwell with `--force` (untested) |
 | Runtime | Docker + NVIDIA container runtime (`docker run --gpus all`) |
 | Disk | ≥ 75 GiB free (image + weights); ≥ 150 GiB if `--build-hybrid` |
 | OS | aarch64 Linux (Grace) |
-| Memory | 128 GiB unified is enough for the model + DFlash drafter + KV @ 16k |
+| Memory | 128 GB / 119 GiB unified is enough for the model + DFlash drafter + KV @ 16k |
 
 GB10 is detected via `nvidia-smi --query-gpu=compute_cap` returning `12.1`;
 anything else needs `--force`.
