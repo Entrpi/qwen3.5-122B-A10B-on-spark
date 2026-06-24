@@ -56,8 +56,8 @@ PROFILE="dflash"                   # dflash | dense | base | mtp
 NSPEC=""                           # override num_speculative_tokens (default per profile)
 PORT="${PORT:-8000}"
 CTX="${CTX:-262144}"               # max-model-len: model native max (KV is ~24 KiB/token)
-GPU_MEM="${GPU_MEM:-0.88}"         # reserves ~15 GB on a 128 GB (119 GiB) GB10
-MAX_NUM_SEQS="${MAX_NUM_SEQS:-4}"          # ~5 fit full native ctx each; raise for short-ctx concurrency
+GPU_MEM="${GPU_MEM:-0.82}"         # VALIDATED: ~14 GiB free (0.88+ over-subscribes -> swap)
+MAX_NUM_SEQS="${MAX_NUM_SEQS:-3}"          # 3 concurrent streams (e.g. 3 subagents); pool ~457k tok, 1.74x @ 262k
 MAX_BATCHED_TOKENS="${MAX_BATCHED_TOKENS:-8192}"  # chunked-prefill chunk (decoupled from ctx)
 BACKEND="${BACKEND:-flash_attn}"
 
@@ -94,8 +94,8 @@ Flags:
   --nspec N               num_speculative_tokens (default 12 dflash/dense, 2 mtp, 0 base).
   --port N                Server port (default: $PORT).
   --ctx N                 max-model-len (default: $CTX = model native max).
-  --gpu-mem F             gpu-memory-utilization (default: $GPU_MEM reserves ~15 GB on 119 GiB).
-  --max-num-seqs N        concurrent sequences (default: $MAX_NUM_SEQS; ~5 fit full ctx each).
+  --gpu-mem F             gpu-memory-utilization (default: $GPU_MEM = ~14 GiB free; 0.88+ over-subscribes/swaps).
+  --max-num-seqs N        concurrent sequences (default: $MAX_NUM_SEQS; KV pool ~457k tokens, 1.74x at full 262k).
   --max-batched-tokens N  chunked-prefill chunk (default: $MAX_BATCHED_TOKENS; keep < ctx).
   --force                 Skip the GB10/SM121 host check.
   --no-smoke              Start the server but skip the Paris smoke test.

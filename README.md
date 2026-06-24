@@ -70,41 +70,43 @@ anything else needs `--force`.
 
 ### Memory & context (defaults tuned for: 1 orchestrator + up to 3 subagents)
 
-Target use case — **one user**, one main Hermes orchestrator thread (~100 k
-context average, safe up to the model's 262 144 max) that can spin up **up to 3
-subagents** (<100 k each). Default operation is a single decode stream; we want
-all **4 concurrent** streams to be smoothly additive (no preemption).
+Target use case — **one user**, one main orchestrator thread (~100 k context
+average, safe up to the model's 262 144 max) that dispatches **up to 3 subagents**
+(<100 k each). With prefix-caching off (DFlash requires it) the orchestrator is
+*not* a persistent stream — when it dispatches it has ended its turn and is idle
+until the subagents return — so the concurrent peak is the **3 subagents**, not 4.
 
-That fits easily, because the model is **36/48 linear-attention (GDN) + 12
-full-attention** layers with GQA `num_key_value_heads=2`, `head_dim=256` → **only
-~24 KiB/token of KV**. The GDN layers hold a *fixed* per-sequence state (~0.1–0.2
-GiB) that does **not** grow with context. On the 128 GB (119 GiB) GB10, reserving
-~15 GB for the OS leaves ~105 GiB for vLLM:
+These numbers are **measured on the box**, not estimated (an earlier naive
+"24 KiB/token → ~1.3 M pool" projection was wrong — the per-sequence GDN/mamba
+state and the activation reserve cost far more than the attention KV alone). At
+the shipped defaults (`gpu-mem 0.82`, `ctx 262144`, `seqs 3`):
 
-| | |
+| | measured |
 |---|---|
-| weights (INT4) + DFlash drafter | ~64 GiB |
-| CUDA graphs + activations | ~10 GiB |
-| GDN state × 4 seq slots | ~0.5–1 GiB |
-| **attention-KV pool** | **~30 GiB ≈ ~1.3 M tokens** |
+| free memory at READY | **~14 GiB** (responsive, no swap) |
+| GPU KV cache pool | **456,664 tokens** |
+| max concurrency @ full 262 144 | **1.74×** |
+| concurrency 1 → 2 → 3 (prose) | per-request **26.5 → 18.8 → 17.4** tok/s · aggregate **26.5 → 36.8 → 51.6** |
 
-A full 262 144 context is only ~6 GiB of KV, so the pool holds **~5 full-context
-sequences**. The intended load — orchestrator @ up to 262 144 + 3 subagents @
-~100 k ≈ 560 k tokens (~13 GiB) — uses well under half the pool, so the 4 streams
-**never preempt**. Defaults (override via flags/env):
+Your realistic peak — 3 subagents <100 k (≈ <300 k tokens) — fits the 456 k pool
+with margin, and the orchestrator can still run to the full 262 k when it's the
+active stream. **Why not higher:** `gpu-mem 0.88–0.89` over-subscribes this box —
+the static footprint left only ~5 GiB free, it swapped, and requests hung. `0.82`
+is the validated sweet spot (~14 GiB headroom). Defaults (override via flags/env):
 
 | Flag / env | Default | Note |
 |---|---|---|
-| `--gpu-mem` / `GPU_MEM` | **0.88** | reserves ~15 GB for OS/other apps; drop to 0.86 if the OOM-guard fires on first load |
-| `--ctx` / `CTX` (`MAX_MODEL_LEN`) | **262144** | model native max — keeps the orchestrator safe at any length |
-| `--max-num-seqs` / `MAX_NUM_SEQS` | **4** | 1 orchestrator + 3 subagents; all four fit the full context (pool ÷ ctx ≈ 5) |
+| `--gpu-mem` / `GPU_MEM` | **0.82** | ~14 GiB free (validated). 0.88+ over-subscribes → swap → hangs. |
+| `--ctx` / `CTX` (`MAX_MODEL_LEN`) | **262144** | model native max — orchestrator safe at any length (costs only KV-pool sizing; graph range is tied to `max-batched-tokens`) |
+| `--max-num-seqs` / `MAX_NUM_SEQS` | **3** | the concurrent-subagent peak; pool ÷ ctx ≈ 1.74× full-context, ample for <100 k subagents |
 | `--max-batched-tokens` / `MAX_BATCHED_TOKENS` | **8192** | chunked-prefill chunk — kept **below** ctx so a long prefill doesn't batch all at once |
 
 **Single-stream is the default operating point** (DFlash speculative decode is a
-single-stream lever; at 1 active stream there's no contention and you get the full
-~81 tok/s on agent turns). Concurrency 2–4 is memory-safe and additive for these
-contexts; per-request tok/s eases down as the decode batch grows (more routed-expert
-traffic per step) — the cost is throughput-vs-latency, not safety.
+single-stream lever; at 1 active stream there's no contention — ~81 tok/s on agent
+turns). 2–3 concurrent is additive: per-request tok/s eases down as the decode
+batch grows (more routed-expert traffic/step) while aggregate rises — the cost is
+throughput-vs-latency, not safety. For a 4th simultaneous stream raise
+`--max-num-seqs 4` (it'll queue, not crash) or trim `--ctx`.
 
 > Unified-memory OOM **hard-freezes** the box, and vLLM's profiler can undershoot
 > peak by a couple GB — always bring the server up under

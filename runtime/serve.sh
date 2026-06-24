@@ -20,8 +20,8 @@ BACKEND="${2:-flash_attn}"
 MODEL="${MODEL:-Intel/Qwen3.5-122B-A10B-int4-AutoRound}"
 DRAFT="${DRAFT:-z-lab/Qwen3.5-122B-A10B-DFlash}"
 MAX_MODEL_LEN="${MAX_MODEL_LEN:-262144}"      # model native max; KV is ~24 KiB/token so it fits
-GPU_MEM="${GPU_MEM:-0.88}"                     # ~15 GB reserved on a 128 GB (119 GiB) GB10
-MAX_NUM_SEQS="${MAX_NUM_SEQS:-4}"             # ~5 seqs fit the full native ctx each (KV pool ~1.38M / 262144)
+GPU_MEM="${GPU_MEM:-0.82}"                     # VALIDATED: ~14 GiB free on 128 GB (119 GiB) GB10 (0.88+ over-subscribes -> swap)
+MAX_NUM_SEQS="${MAX_NUM_SEQS:-3}"             # 3 concurrent streams; KV pool ~457k tokens, 1.74x at full 262144
 MAX_BATCHED_TOKENS="${MAX_BATCHED_TOKENS:-8192}"  # chunked-prefill chunk (NOT = max-model-len)
 PORT="${PORT:-8000}"
 
