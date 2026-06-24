@@ -209,7 +209,7 @@ download_models() {
 # ============================================================================
 
 build_hybrid() {
-    [[ "$BUILD_HYBRID" -eq 1 ]] || return
+    [[ "$BUILD_HYBRID" -eq 1 ]] || return 0
     if [[ -f "$HYBRID_DIR/model.safetensors.index.json" ]]; then ok "Hybrid ckpt present: $HYBRID_DIR"; return; fi
     local gptq="$MODEL_DIR"
     if [[ -z "$gptq" ]]; then
