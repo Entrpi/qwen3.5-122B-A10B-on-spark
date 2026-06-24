@@ -158,9 +158,9 @@ verify_host() {
         [[ "$FORCE_HW" -eq 1 ]] || die "Not detecting GB10/SM12.1. Pass --force (and maybe --backend) to proceed."
         warn "Host is not GB10/SM121; proceeding under --force (untested)."
     fi
-    # Docker can see the GPU?
+    # Docker can see the GPU? (--entrypoint true so we test GPU access, not the image's CMD)
     if ! docker info 2>/dev/null | grep -qiE 'nvidia|Default Runtime: nvidia' \
-       && ! docker run --rm --gpus all "$IMAGE" true 2>/dev/null; then
+       && ! docker run --rm --gpus all --entrypoint true "$IMAGE" 2>/dev/null; then
         warn "Could not confirm Docker GPU access (nvidia-container-toolkit). 'docker run --gpus all' must work."
     fi
     # Disk
