@@ -7,16 +7,18 @@ set -euo pipefail
 NSPEC="${1:-2}"
 BACKEND="${2:-flash_attn}"
 MODEL="${MODEL:-Intel/Qwen3.5-122B-A10B-int4-AutoRound}"
-MAX_MODEL_LEN="${MAX_MODEL_LEN:-16384}"
-GPU_MEM="${GPU_MEM:-0.8}"
+MAX_MODEL_LEN="${MAX_MODEL_LEN:-262144}"
+GPU_MEM="${GPU_MEM:-0.89}"
+MAX_NUM_SEQS="${MAX_NUM_SEQS:-1}"
+MAX_BATCHED_TOKENS="${MAX_BATCHED_TOKENS:-8192}"
 PORT="${PORT:-8000}"
 echo "[mtp] qwen3_5_mtp — backend=$BACKEND, num_speculative_tokens=$NSPEC, model=$MODEL"
 exec vllm serve "$MODEL" \
   --served-model-name qwen \
   --host 0.0.0.0 --port "$PORT" \
   --max-model-len "$MAX_MODEL_LEN" \
-  --max-num-seqs 16 \
-  --max-num-batched-tokens "$MAX_MODEL_LEN" \
+  --max-num-seqs "$MAX_NUM_SEQS" \
+  --max-num-batched-tokens "$MAX_BATCHED_TOKENS" \
   --gpu-memory-utilization "$GPU_MEM" \
   --no-enable-prefix-caching \
   --enable-chunked-prefill \

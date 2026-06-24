@@ -19,8 +19,10 @@ NSPEC="${1:-12}"
 BACKEND="${2:-flash_attn}"
 MODEL="${MODEL:-Intel/Qwen3.5-122B-A10B-int4-AutoRound}"
 DRAFT="${DRAFT:-z-lab/Qwen3.5-122B-A10B-DFlash}"
-MAX_MODEL_LEN="${MAX_MODEL_LEN:-16384}"
-GPU_MEM="${GPU_MEM:-0.8}"
+MAX_MODEL_LEN="${MAX_MODEL_LEN:-262144}"      # model native max; KV is ~24 KiB/token so it fits
+GPU_MEM="${GPU_MEM:-0.89}"                     # ~14 GB reserved on a 128 GB (119 GiB) GB10
+MAX_NUM_SEQS="${MAX_NUM_SEQS:-1}"             # single-stream; each seq also reserves GDN state
+MAX_BATCHED_TOKENS="${MAX_BATCHED_TOKENS:-8192}"  # chunked-prefill chunk (NOT = max-model-len)
 PORT="${PORT:-8000}"
 
 # FLA sm121 big-tile shmem fix (prefill/TTFT only on sm121; harmless, free).
@@ -49,8 +51,8 @@ exec vllm serve "$MODEL" \
   --served-model-name qwen \
   --host 0.0.0.0 --port "$PORT" \
   --max-model-len "$MAX_MODEL_LEN" \
-  --max-num-seqs 16 \
-  --max-num-batched-tokens "$MAX_MODEL_LEN" \
+  --max-num-seqs "$MAX_NUM_SEQS" \
+  --max-num-batched-tokens "$MAX_BATCHED_TOKENS" \
   --gpu-memory-utilization "$GPU_MEM" \
   --no-enable-prefix-caching \
   --enable-chunked-prefill \

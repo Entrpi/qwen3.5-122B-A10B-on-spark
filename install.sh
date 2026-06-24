@@ -55,8 +55,10 @@ NAME="${NAME:-qwen-spark}"
 PROFILE="dflash"                   # dflash | dense | base | mtp
 NSPEC=""                           # override num_speculative_tokens (default per profile)
 PORT="${PORT:-8000}"
-CTX="${CTX:-16384}"
-GPU_MEM="${GPU_MEM:-0.8}"
+CTX="${CTX:-262144}"               # max-model-len: model native max (KV is ~24 KiB/token)
+GPU_MEM="${GPU_MEM:-0.89}"         # reserves ~14 GB on a 128 GB (119 GiB) GB10
+MAX_NUM_SEQS="${MAX_NUM_SEQS:-1}"          # single-stream; raise for concurrency (cheap here)
+MAX_BATCHED_TOKENS="${MAX_BATCHED_TOKENS:-8192}"  # chunked-prefill chunk (decoupled from ctx)
 BACKEND="${BACKEND:-flash_attn}"
 
 FORCE_HW=0
@@ -91,14 +93,16 @@ Flags:
   --hf-home DIR           Use/populate this HF cache dir (default: $HF_HOME).
   --nspec N               num_speculative_tokens (default 12 dflash/dense, 2 mtp, 0 base).
   --port N                Server port (default: $PORT).
-  --ctx N                 max-model-len (default: $CTX).
-  --gpu-mem F             gpu-memory-utilization, keep <=0.84 on 128GB (default: $GPU_MEM).
+  --ctx N                 max-model-len (default: $CTX = model native max).
+  --gpu-mem F             gpu-memory-utilization (default: $GPU_MEM reserves ~14 GB on 119 GiB).
+  --max-num-seqs N        concurrent sequences (default: $MAX_NUM_SEQS, single-stream).
+  --max-batched-tokens N  chunked-prefill chunk (default: $MAX_BATCHED_TOKENS; keep < ctx).
   --force                 Skip the GB10/SM121 host check.
   --no-smoke              Start the server but skip the Paris smoke test.
 
 Environment equivalents:
   QWEN_IMAGE TARGET_REPO DRAFT_REPO FP8_REPO HF_HOME HYBRID_DIR
-  NAME PORT CTX GPU_MEM BACKEND REPO_DIR REPO_URL
+  NAME PORT CTX GPU_MEM MAX_NUM_SEQS MAX_BATCHED_TOKENS BACKEND REPO_DIR REPO_URL
 EOF
 }
 
@@ -116,6 +120,8 @@ while [[ $# -gt 0 ]]; do
         --port) PORT="$2"; shift 2 ;;
         --ctx) CTX="$2"; shift 2 ;;
         --gpu-mem) GPU_MEM="$2"; shift 2 ;;
+        --max-num-seqs) MAX_NUM_SEQS="$2"; shift 2 ;;
+        --max-batched-tokens) MAX_BATCHED_TOKENS="$2"; shift 2 ;;
         --backend) BACKEND="$2"; shift 2 ;;
         --force) FORCE_HW=1; shift ;;
         --no-smoke) SKIP_SMOKE=1; shift ;;
@@ -270,7 +276,8 @@ start_server() {
     docker rm -f "$NAME" >/dev/null 2>&1 || true
     # shellcheck disable=SC2086
     docker run -d --name "$NAME" --gpus all --net=host --ipc=host --ulimit memlock=-1:-1 \
-        -e HF_HOME=/hf -e MAX_MODEL_LEN="$CTX" -e GPU_MEM="$GPU_MEM" ${HF_TOKEN:+-e HF_TOKEN="$HF_TOKEN"} \
+        -e HF_HOME=/hf -e MAX_MODEL_LEN="$CTX" -e GPU_MEM="$GPU_MEM" \
+        -e MAX_NUM_SEQS="$MAX_NUM_SEQS" -e MAX_BATCHED_TOKENS="$MAX_BATCHED_TOKENS" ${HF_TOKEN:+-e HF_TOKEN="$HF_TOKEN"} \
         "${model_env[@]}" \
         -v "$HF_HOME:/hf" -v "$REPO_DIR/runtime:/host:ro" "${mounts[@]}" \
         --entrypoint bash "$IMAGE" "$wrapper" $serve_args >/dev/null

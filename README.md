@@ -68,6 +68,36 @@ Preview without running: `... | bash -s -- --help`.
 GB10 is detected via `nvidia-smi --query-gpu=compute_cap` returning `12.1`;
 anything else needs `--force`.
 
+### Memory & context (defaults are tuned for max context + KV depth)
+
+This model is **36/48 linear-attention (GDN) + 12 full-attention** layers, and the
+attention layers use GQA `num_key_value_heads=2`, `head_dim=256` → **only
+~24 KiB/token of KV**. A full **262 144** context (the model's native max) is just
+~6 GiB of KV; the GDN layers hold a *fixed* per-sequence state (~0.2 GiB) that
+does **not** grow with context. So on the 128 GB (119 GiB) GB10, reserving 14 GB
+for the OS leaves ~106 GiB for vLLM:
+
+| | |
+|---|---|
+| weights (INT4) + DFlash drafter | ~64 GiB |
+| CUDA graphs + activations | ~10 GiB |
+| **KV pool** | **~32 GiB ≈ 1.38 M tokens** |
+
+The KV pool (~1.38 M tokens) dwarfs a single 262 144 context, so single context is
+capped by the *model*, not memory. Defaults (override via flags/env):
+
+| Flag / env | Default | Note |
+|---|---|---|
+| `--gpu-mem` / `GPU_MEM` | **0.89** | reserves ~14 GB; drop to 0.87 if the OOM-guard fires on first load |
+| `--ctx` / `CTX` (`MAX_MODEL_LEN`) | **262144** | model native max |
+| `--max-num-seqs` / `MAX_NUM_SEQS` | **1** | single-stream; raising it is nearly free (pool ≫ one context) |
+| `--max-batched-tokens` / `MAX_BATCHED_TOKENS` | **8192** | chunked-prefill chunk — kept **below** ctx so a long prefill doesn't batch all at once |
+
+> Unified-memory OOM **hard-freezes** the box, and vLLM's profiler can undershoot
+> peak by a couple GB — always bring the server up under
+> [`scripts/monitor.sh`](scripts/monitor.sh) (OOM auto-kill guard) the first time
+> at a new `gpu-mem`/`ctx`.
+
 ## What you get — profiles
 
 Pick with `--profile`:
