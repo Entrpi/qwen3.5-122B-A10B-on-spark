@@ -282,9 +282,10 @@ docs/
 # default agent path (DFlash) + smoke test:
 ./install.sh --start
 
-# the dense stack (build the hybrid checkpoint once, ~20 min, then serve):
-./install.sh --build-hybrid
+# the dense stack (downloads the prebuilt hybrid checkpoint):
 ./install.sh --start --profile dense
+# (to build the hybrid checkpoint locally instead of downloading it:)
+#   ./install.sh --build-hybrid && ./install.sh --start --profile dense
 
 # benchmarks (run on the host against the server; requires: pip install requests):
 python3 scripts/bench_decode.py --base-url http://127.0.0.1:8000 --model qwen \
