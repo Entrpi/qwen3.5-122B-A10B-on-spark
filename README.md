@@ -129,6 +129,18 @@ streams queue rather than fail) or a smaller `--ctx`.
 > [`scripts/monitor.sh`](scripts/monitor.sh) (OOM auto-kill guard) the first time
 > at any new `gpu-mem` or `ctx`.
 
+### Startup time
+
+Time to READY is **~3 min** (vs ~12 min on the default loader). `--load-format
+fastsafetensors` (default) reads the 62–71 GiB **straight to the device** —
+**~32 s** vs ~8 min for the default mmap-backed per-tensor read + redundant
+CPU→GPU copy, which is pathologically slow on GB10's current kernel (the copy is
+also physically pointless on unified memory). It falls back to `nogds`
+automatically — no GPUDirect Storage hardware required; override with
+`LOAD_FORMAT=auto`. The remaining ~2.5 min is `torch.compile` (~42 s) + CUDA-graph
+capture (~2 min); the compile cache is persisted at `$HF_HOME/.vllm_cache`, so
+boots after the first skip the compile.
+
 ## Profiles
 
 Selected with `--profile`:

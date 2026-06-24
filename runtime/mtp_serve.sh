@@ -11,6 +11,7 @@ MAX_MODEL_LEN="${MAX_MODEL_LEN:-262144}"
 GPU_MEM="${GPU_MEM:-0.82}"
 MAX_NUM_SEQS="${MAX_NUM_SEQS:-3}"
 MAX_BATCHED_TOKENS="${MAX_BATCHED_TOKENS:-8192}"
+LOAD_FORMAT="${LOAD_FORMAT:-fastsafetensors}"
 PORT="${PORT:-8000}"
 echo "[mtp] qwen3_5_mtp — backend=$BACKEND, num_speculative_tokens=$NSPEC, model=$MODEL"
 exec vllm serve "$MODEL" \
@@ -23,5 +24,6 @@ exec vllm serve "$MODEL" \
   --no-enable-prefix-caching \
   --enable-chunked-prefill \
   --trust-remote-code \
+  --load-format "$LOAD_FORMAT" \
   --attention-backend "$BACKEND" \
   --speculative-config "{\"method\":\"qwen3_5_mtp\",\"num_speculative_tokens\":$NSPEC,\"model\":\"$MODEL\"}"
