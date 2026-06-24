@@ -1,11 +1,15 @@
 # qwen3.5-122B-A10B-on-spark
 
-[`Qwen3.5-122B-A10B`](https://huggingface.co/Intel/Qwen3.5-122B-A10B-int4-AutoRound)
+[`Qwen3.5-122B-A10B`](https://huggingface.co/bleysg/Qwen3.5-122B-A10B-int4-fp8-hybrid)
 (hybrid GDN + mamba + 128-expert MoE, ~10B active) on a single
 **NVIDIA DGX Spark** (GB10 / SM121, 128 GB / 119 GiB unified) under **vLLM**, with
 **[DFlash](https://modal.com/blog/spec-is-all-u-need) block-diffusion speculative
-decode** and an optional **dense-bandwidth patch stack** — measured end-to-end,
-with a per-token bandwidth model behind the numbers.
+decode** and a **dense-bandwidth patch stack** — measured end-to-end, with a
+per-token bandwidth model behind the numbers.
+
+**The default `dense` profile** serves a purpose-built **hybrid INT4+FP8
+checkpoint**, [`bleysg/Qwen3.5-122B-A10B-int4-fp8-hybrid`](https://huggingface.co/bleysg/Qwen3.5-122B-A10B-int4-fp8-hybrid),
+downloaded ready-to-run — no local checkpoint build.
 
 **Status:** working end-to-end, one-shot install. On real agent tool-call turns,
 **DFlash decode reaches a median ~81 tok/s on GB10** — about **2× the native
@@ -25,9 +29,9 @@ plain DFlash on high-acceptance agent traffic (per the
 The **`dflash`** profile drops the dense patches for the largest KV pool and the
 same ~81 tok/s on agents.
 
-- **Engine:** [`vLLM`](https://github.com/vllm-project/vllm) 0.23, sm121 build with the DFlash PRs, via the prebuilt image `ghcr.io/aeon-7/aeon-vllm-ultimate:2026-06-18-v0.23.0-dflashfix`. No host build — the four runtime patches in [`runtime/`](runtime/) are applied at serve time.
-- **Target:** [`Intel/Qwen3.5-122B-A10B-int4-AutoRound`](https://huggingface.co/Intel/Qwen3.5-122B-A10B-int4-AutoRound) — INT4 (AutoRound/GPTQ) routed experts + attention, BF16 shared experts / embeddings / head, ~62 GiB. Safetensors, *not* GGUF — vLLM serves the HF checkpoint directly.
-- **Drafter:** [`z-lab/Qwen3.5-122B-A10B-DFlash`](https://huggingface.co/z-lab/Qwen3.5-122B-A10B-DFlash) — 0.8B / 6-layer non-causal block-diffusion drafter (block 16), sharing the target's `embed_tokens` + `lm_head`, ~1.6 GiB.
+- **Model (default):** [`bleysg/Qwen3.5-122B-A10B-int4-fp8-hybrid`](https://huggingface.co/bleysg/Qwen3.5-122B-A10B-int4-fp8-hybrid) — the prebuilt hybrid the `dense` profile downloads and serves: INT4 (AutoRound/GPTQ) routed experts + attention, **calibrated FP8** shared experts, BF16 embeddings / head; ~67 GiB safetensors (*not* GGUF — vLLM serves it directly). Built from [`Intel/Qwen3.5-122B-A10B-int4-AutoRound`](https://huggingface.co/Intel/Qwen3.5-122B-A10B-int4-AutoRound) (INT4 base) + [`Qwen/Qwen3.5-122B-A10B-FP8`](https://huggingface.co/Qwen/Qwen3.5-122B-A10B-FP8) (FP8 shared experts). The `dflash` / `base` / `mtp` profiles serve the plain `Intel/…int4-AutoRound` instead.
+- **Drafter:** [`z-lab/Qwen3.5-122B-A10B-DFlash`](https://huggingface.co/z-lab/Qwen3.5-122B-A10B-DFlash) — 0.8B / 6-layer non-causal block-diffusion drafter (block 16), sharing the model's `embed_tokens` + `lm_head`, ~1.6 GiB.
+- **Engine:** [`vLLM`](https://github.com/vllm-project/vllm) 0.23, sm121 build with the DFlash PRs, via the prebuilt image `ghcr.io/aeon-7/aeon-vllm-ultimate:2026-06-18-v0.23.0-dflashfix`. No host build — the runtime patches in [`runtime/`](runtime/) are applied at serve time.
 - **Hardware:** NVIDIA DGX Spark, GB10, SM121, 128 GB LPDDR5X unified (~119 GiB usable), ~273 GB/s.
 
 ## Quick start
@@ -42,16 +46,23 @@ This command:
 
 1. Verifies the host (aarch64, GB10 / SM121, Docker GPU access, free disk).
 2. Pulls the sm121 vLLM image (~40 GiB, one-time).
-3. Downloads the INT4 target (~62 GiB) and the DFlash drafter (~1.6 GiB) into the HF cache.
-4. Starts the `dflash` profile on `:8000`, waits until READY, and runs the
-   "capital of France" smoke test (asserts "Paris").
+3. Downloads the hybrid checkpoint (~67 GiB) and the DFlash drafter (~1.6 GiB) into the HF cache.
+4. Starts the **`dense`** profile on `:8000`, waits until READY (~3 min), and runs
+   the "capital of France" smoke test (asserts "Paris").
 
-To reuse a checkpoint that is already present and skip the ~62 GiB download:
+For the plain-DFlash agent profile (largest KV pool, no dense patches, serves the
+Intel INT4 checkpoint):
 
 ```bash
-# point at an existing checkpoint directory (mounted read-only at /model):
-./install.sh --start --model-dir /path/to/Qwen3.5-122B-A10B-int4-AutoRound
-# or reuse an existing HF cache (the download becomes a no-op if already present):
+./install.sh --start --profile dflash
+```
+
+To reuse a checkpoint already on disk and skip the download:
+
+```bash
+# an existing checkpoint directory (mounted read-only at /model):
+./install.sh --start --model-dir /path/to/checkpoint
+# or reuse an existing HF cache (download becomes a no-op if already present):
 ./install.sh --start --hf-home /mnt/big/hf
 ```
 
@@ -329,8 +340,9 @@ python3 scripts/conc_workloads.py --base-url http://127.0.0.1:8000 # concurrency
 
 | Project | Role |
 |---|---|
+| [`bleysg/...int4-fp8-hybrid`](https://huggingface.co/bleysg/Qwen3.5-122B-A10B-int4-fp8-hybrid) | **the default served checkpoint** — this project's prebuilt hybrid INT4+FP8 |
 | [`vLLM`](https://github.com/vllm-project/vllm) | the inference engine; served unmodified-on-disk |
-| [`Intel/...int4-AutoRound`](https://huggingface.co/Intel/Qwen3.5-122B-A10B-int4-AutoRound) · [`z-lab/...DFlash`](https://huggingface.co/z-lab/Qwen3.5-122B-A10B-DFlash) | the target and drafter weights |
+| [`Intel/...int4-AutoRound`](https://huggingface.co/Intel/Qwen3.5-122B-A10B-int4-AutoRound) (INT4 base) · [`Qwen/...FP8`](https://huggingface.co/Qwen/Qwen3.5-122B-A10B-FP8) (FP8 donor) · [`z-lab/...DFlash`](https://huggingface.co/z-lab/Qwen3.5-122B-A10B-DFlash) (drafter) | upstream weights the hybrid + `dflash` profiles build on |
 | [`albond/DGX_Spark_Qwen3.5-122B-A10B-AR-INT4`](https://github.com/albond/DGX_Spark_Qwen3.5-122B-A10B-AR-INT4) | the MTP + hybrid-FP8 + int8-lm-head recipe; benchmark reference and source of the ported dense levers |
 | [`Entrpi/ds4-on-spark`](https://github.com/Entrpi/ds4-on-spark) | sibling repo, same hardware, different model (DeepSeek-V4-Flash via ds4) |
 | [Modal: *Speculative decoding is all you need*](https://modal.com/blog/spec-is-all-u-need) | the DFlash block-diffusion drafter and the task-dependent-acceptance framing |
