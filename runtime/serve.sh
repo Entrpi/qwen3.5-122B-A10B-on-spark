@@ -21,7 +21,7 @@ MODEL="${MODEL:-Intel/Qwen3.5-122B-A10B-int4-AutoRound}"
 DRAFT="${DRAFT:-z-lab/Qwen3.5-122B-A10B-DFlash}"
 MAX_MODEL_LEN="${MAX_MODEL_LEN:-262144}"      # model native max; KV is ~24 KiB/token so it fits
 GPU_MEM="${GPU_MEM:-0.82}"                     # VALIDATED: ~14 GiB free on 128 GB (119 GiB) GB10 (0.88+ over-subscribes -> swap)
-MAX_NUM_SEQS="${MAX_NUM_SEQS:-3}"             # 3 concurrent streams; KV pool ~457k tokens, 1.74x at full 262144
+MAX_NUM_SEQS="${MAX_NUM_SEQS:-3}"             # 3 concurrent streams; KV pool ~427k (dense) / ~457k (dflash) tokens at full 262144
 MAX_BATCHED_TOKENS="${MAX_BATCHED_TOKENS:-8192}"  # chunked-prefill chunk (NOT = max-model-len)
 PORT="${PORT:-8000}"
 # Read straight to the device (no mmap, no host staging) — the slow default safetensors
@@ -29,6 +29,14 @@ PORT="${PORT:-8000}"
 # automatically. Override LOAD_FORMAT=auto|safetensors if the pkg is absent (or set
 # --safetensors-load-strategy eager via SAFETENSORS_STRATEGY).
 LOAD_FORMAT="${LOAD_FORMAT:-fastsafetensors}"
+
+# Reclaim vLLM's CUDA-graph memory OVER-estimate back to the KV pool. The profiler
+# reserves ~0.7 GiB for the graph pool but capture actually uses ~0.14 GiB; disabling
+# the estimate gives the difference (~0.6 GiB / ~9.5k tokens) to KV. The real capture
+# then comes out of the (1 - gpu-mem) headroom, which is ~21 GiB at 0.82 -> no OOM
+# risk at the shipped util. Set ESTIMATE_CUDAGRAPHS=1 to restore vLLM's default if you
+# push gpu-mem very high (small headroom).
+export VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS="${VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS:-0}"
 
 # FLA sm121 big-tile shmem fix (prefill/TTFT only on sm121; harmless, free).
 echo "[serve] FLA sm121 big-tile shmem patch"

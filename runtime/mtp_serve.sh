@@ -13,6 +13,8 @@ MAX_NUM_SEQS="${MAX_NUM_SEQS:-3}"
 MAX_BATCHED_TOKENS="${MAX_BATCHED_TOKENS:-8192}"
 LOAD_FORMAT="${LOAD_FORMAT:-fastsafetensors}"
 PORT="${PORT:-8000}"
+# Reclaim the CUDA-graph memory over-estimate to KV (see serve.sh). Set =1 to restore.
+export VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS="${VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS:-0}"
 echo "[mtp] qwen3_5_mtp — backend=$BACKEND, num_speculative_tokens=$NSPEC, model=$MODEL"
 exec vllm serve "$MODEL" \
   --served-model-name qwen \

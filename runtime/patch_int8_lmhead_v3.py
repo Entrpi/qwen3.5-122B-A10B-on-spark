@@ -5,9 +5,13 @@ batched int8 GEMV (one kernel launch for any batch), leaving the existing TP
 gather + org_vocab_size trim untouched.
 
 Fixes vs the broken v2 port:
-  * KEEPS the bf16 lm_head weight (DFlash drafter shares it) — does NOT zero it.
-    Trades the memory saving for correctness; the speed win is the int8 read in
-    _get_logits, independent of keeping bf16 around.
+  * Builds the int8 copy lazily on the first warmup forward, then FREES the dead
+    bf16 weight (~1.4 GiB -> KV pool) + empty_cache(). Safe here: the DFlash
+    drafter SHARES this same int8 lm_head module (one int8 build; drafter ckpt has
+    no lm_head/embed) and tie_word_embeddings=False, so bf16 has no remaining
+    reader (bias fallback does int8-GEMV + add-bias). v2's "garbage" was zeroing
+    bf16 eagerly before the shared/int8 path was ready. SPARK_KEEP_BF16_LMHEAD=1
+    restores the keep-bf16 behavior.
   * Single BATCHED kernel (dot-based, pad B->16) for ALL B — no per-row Python
     loop (the v2 B>4 loop was what made spec decode SLOWER).
   * Fixed proven config (N128/K128/w4/s3, ~227 GB/s, argmax-exact vs bf16 on the
@@ -82,6 +86,7 @@ def _spark_int8_gemm(hidden, w_int8, w_scale):
 
 
 def _spark_int8_lmhead_apply(self, lm_head, hidden_states, embedding_bias):
+    import os
     import sys
     import torch
     if not getattr(lm_head, "_spark_int8_ready", None) is True and \\
@@ -95,12 +100,34 @@ def _spark_int8_lmhead_apply(self, lm_head, hidden_states, embedding_bias):
             lm_head._spark_w_int8 = w_int8.contiguous()
             lm_head._spark_w_scale = scales.to(torch.float16)
             lm_head._spark_int8_ready = True
-            print("DGX_SPARK_INT8_LMHEAD_V3: lm_head -> int8 (%s), bf16 kept for shared drafter"
-                  % (list(w_int8.shape),), file=sys.stderr, flush=True)
+            # Free the now-dead bf16 copy to give its ~1.4 GiB back to the KV pool.
+            # SAFE here because: (1) the DFlash drafter SHARES this same lm_head
+            # module (verified: one int8 build, drafter ckpt has no lm_head) so it
+            # also uses the int8 path; (2) tie_word_embeddings=False so .weight is
+            # NOT shared with embed_tokens; (3) this runs in the init warmup BEFORE
+            # KV-cache sizing, so the pool grows. The only bf16 reader left is the
+            # bias fallback, handled post-hoc below. Toggle off with
+            # SPARK_KEEP_BF16_LMHEAD=1 (reverts to the v3 keep-bf16 behavior).
+            if os.environ.get("SPARK_KEEP_BF16_LMHEAD", "0") != "1":
+                lm_head.weight.data = torch.empty(0, dtype=w.dtype, device=w.device)
+                lm_head._spark_bf16_freed = True
+                # Return the freed block to the driver NOW so vLLM's mem_get_info
+                # based KV sizing (which runs right after this warmup) actually
+                # counts it — otherwise the caching allocator holds most of it.
+                torch.cuda.empty_cache()
+                _spark_msg = "bf16 FREED (int8-only, ~1.4 GiB -> KV)"
+            else:
+                _spark_msg = "bf16 kept for shared drafter"
+            print("DGX_SPARK_INT8_LMHEAD_V3: lm_head -> int8 (%s), %s"
+                  % (list(w_int8.shape), _spark_msg), file=sys.stderr, flush=True)
         else:
             lm_head._spark_int8_disabled = True
-    if getattr(lm_head, "_spark_int8_ready", False) and embedding_bias is None:
-        return _spark_int8_gemm(hidden_states, lm_head._spark_w_int8, lm_head._spark_w_scale)
+    if getattr(lm_head, "_spark_int8_ready", False):
+        if embedding_bias is None:
+            return _spark_int8_gemm(hidden_states, lm_head._spark_w_int8, lm_head._spark_w_scale)
+        if getattr(lm_head, "_spark_bf16_freed", False):
+            # bias path can't read the freed bf16 weight; do int8 GEMV + add bias.
+            return _spark_int8_gemm(hidden_states, lm_head._spark_w_int8, lm_head._spark_w_scale) + embedding_bias
     return lm_head.quant_method.apply(lm_head, hidden_states, bias=embedding_bias)
 # =================== end DGX_SPARK_INT8_LMHEAD_V3 ===================
 '''

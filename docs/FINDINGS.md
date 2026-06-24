@@ -86,7 +86,17 @@ transfer to vLLM 0.23 + DFlash:
   ~6.5–8.8 ms) — **~2× faster, argmax-exact**. Prior ports failed not on the
   kernel but on **integration**: zeroing the lm-head weight corrupted the
   *drafter-shared* head (garbage), and a per-row loop for B>4 was slower under
-  spec. v3 uses one batched kernel and **keeps** the bf16 weight.
+  spec. v3 uses one batched kernel; on the first warmup forward it builds the int8
+  copy, then **frees the now-dead bf16 weight** (~1.4 GiB) and `empty_cache()`s so
+  the block returns before vLLM sizes the KV pool. This is safe here because the
+  DFlash drafter *shares this same int8 lm_head module* (verified: exactly one int8
+  build; the drafter checkpoint carries no lm_head/embed tensors) and
+  `tie_word_embeddings=False` (so `.weight` is not aliased to `embed_tokens`) — the
+  bf16 copy has no remaining reader (the bias fallback does int8-GEMV + add-bias
+  instead). Set `SPARK_KEEP_BF16_LMHEAD=1` to restore the keep-bf16 behavior. With
+  `VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=0` (reclaims the CUDA-graph
+  over-estimate), this lifts the `dense` KV pool 376,518 → **426,610 tokens**
+  (+13 %) at the same `0.82` headroom, validated coherent with acceptance 4–12.
 
 Why the denominator matters: the 0.48 GB shared-expert saving is **0.7 % of the
 71 GB on disk** but **~8 % of the ~6 GB *active per-token* footprint** (the disk
