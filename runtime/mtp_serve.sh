@@ -15,6 +15,12 @@ LOAD_FORMAT="${LOAD_FORMAT:-fastsafetensors}"
 PORT="${PORT:-8000}"
 # Reclaim the CUDA-graph memory over-estimate to KV (see serve.sh). Set =1 to restore.
 export VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS="${VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS:-0}"
+# Auto tool-calling + reasoning split (see serve.sh). Off via TOOL_PARSER="" etc.
+TOOL_PARSER="${TOOL_PARSER:-qwen3_xml}"
+REASONING_PARSER="${REASONING_PARSER:-qwen3}"
+TOOL_ARG=()
+[ -n "$TOOL_PARSER" ] && TOOL_ARG+=(--enable-auto-tool-choice --tool-call-parser "$TOOL_PARSER")
+[ -n "$REASONING_PARSER" ] && TOOL_ARG+=(--reasoning-parser "$REASONING_PARSER")
 echo "[mtp] qwen3_5_mtp — backend=$BACKEND, num_speculative_tokens=$NSPEC, model=$MODEL"
 exec vllm serve "$MODEL" \
   --served-model-name qwen \
@@ -28,4 +34,5 @@ exec vllm serve "$MODEL" \
   --trust-remote-code \
   --load-format "$LOAD_FORMAT" \
   --attention-backend "$BACKEND" \
+  "${TOOL_ARG[@]}" \
   --speculative-config "{\"method\":\"qwen3_5_mtp\",\"num_speculative_tokens\":$NSPEC,\"model\":\"$MODEL\"}"

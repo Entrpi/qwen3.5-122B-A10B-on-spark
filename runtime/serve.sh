@@ -60,6 +60,22 @@ else
 fi
 python3 /host/patch_unify2.py || { [ "$NSPEC" = "0" ] && true; }
 
+# OpenAI automatic tool-calling + reasoning split. Without --enable-auto-tool-choice
+# + --tool-call-parser, any client that sends `tools` with tool_choice="auto" gets
+# HTTP 400 — so agent/tool workloads (the whole point here) need these on. The tool
+# parser only activates when a request carries `tools`, so leaving it on is free for
+# plain chat. Qwen3.5 emits the XML tool format
+# (<tool_call><function=name><parameter=k>v</parameter></function></tool_call>) -> the
+# qwen3_xml parser (NOT hermes, which only reads the JSON format -> empty tool_calls),
+# and <think> reasoning the qwen3 parser splits into `reasoning_content`. Verified:
+# tool_choice="auto" -> tool_calls=[get_weather {"city":"Paris"}]. Disable either with
+# TOOL_PARSER="" / REASONING_PARSER="", or override the name (e.g. qwen3_coder).
+TOOL_PARSER="${TOOL_PARSER:-qwen3_xml}"
+REASONING_PARSER="${REASONING_PARSER:-qwen3}"
+TOOL_ARG=()
+[ -n "$TOOL_PARSER" ] && TOOL_ARG+=(--enable-auto-tool-choice --tool-call-parser "$TOOL_PARSER")
+[ -n "$REASONING_PARSER" ] && TOOL_ARG+=(--reasoning-parser "$REASONING_PARSER")
+
 exec vllm serve "$MODEL" \
   --served-model-name qwen \
   --host 0.0.0.0 --port "$PORT" \
@@ -72,4 +88,5 @@ exec vllm serve "$MODEL" \
   --trust-remote-code \
   --load-format "$LOAD_FORMAT" \
   --attention-backend "$BACKEND" \
+  "${TOOL_ARG[@]}" \
   "${SPEC_ARG[@]}"

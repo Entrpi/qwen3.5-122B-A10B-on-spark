@@ -174,6 +174,17 @@ Selected with `--profile`:
 The server is OpenAI-compatible (`/v1/chat/completions` with tool calls + SSE,
 `/v1/completions`, `/v1/models`) and serves under the model name `qwen`.
 
+**Tool calling is enabled by default** (`--enable-auto-tool-choice
+--tool-call-parser qwen3_xml --reasoning-parser qwen3`), so clients can send `tools`
+with `tool_choice="auto"`. Qwen3.5 emits the *XML* tool format, so `qwen3_xml` is the
+correct parser — `hermes` returns 200 but with empty `tool_calls` (the call lands in
+`content` instead). `<think>` reasoning is split into `reasoning_content`. Override
+with `TOOL_PARSER=` / `REASONING_PARSER=` (empty disables; `qwen3_coder` also works).
+
+**Network:** the server binds `0.0.0.0` in `--net=host`, so it is reachable from the
+LAN at `http://<spark-ip>:8000` — the `127.0.0.1` in the examples is just the local
+default. There is no auth; put it behind a reverse proxy / firewall for shared use.
+
 ## Benchmarks
 
 All single-stream (c=1), temperature 0, GB10. "Hermes" regenerates the next
