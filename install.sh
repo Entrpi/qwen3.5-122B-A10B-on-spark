@@ -56,7 +56,7 @@ PROFILE="dflash"                   # dflash | dense | base | mtp
 NSPEC=""                           # override num_speculative_tokens (default per profile)
 PORT="${PORT:-8000}"
 CTX="${CTX:-262144}"               # max-model-len: model native max (KV is ~24 KiB/token)
-GPU_MEM="${GPU_MEM:-0.89}"         # reserves ~14 GB on a 128 GB (119 GiB) GB10
+GPU_MEM="${GPU_MEM:-0.88}"         # reserves ~15 GB on a 128 GB (119 GiB) GB10
 MAX_NUM_SEQS="${MAX_NUM_SEQS:-4}"          # ~5 fit full native ctx each; raise for short-ctx concurrency
 MAX_BATCHED_TOKENS="${MAX_BATCHED_TOKENS:-8192}"  # chunked-prefill chunk (decoupled from ctx)
 BACKEND="${BACKEND:-flash_attn}"
@@ -94,7 +94,7 @@ Flags:
   --nspec N               num_speculative_tokens (default 12 dflash/dense, 2 mtp, 0 base).
   --port N                Server port (default: $PORT).
   --ctx N                 max-model-len (default: $CTX = model native max).
-  --gpu-mem F             gpu-memory-utilization (default: $GPU_MEM reserves ~14 GB on 119 GiB).
+  --gpu-mem F             gpu-memory-utilization (default: $GPU_MEM reserves ~15 GB on 119 GiB).
   --max-num-seqs N        concurrent sequences (default: $MAX_NUM_SEQS; ~5 fit full ctx each).
   --max-batched-tokens N  chunked-prefill chunk (default: $MAX_BATCHED_TOKENS; keep < ctx).
   --force                 Skip the GB10/SM121 host check.
