@@ -59,7 +59,9 @@ def _spark_k_int8(x_ptr, w_ptr, s_ptr, o_ptr, B, N, K,
     s = _spark_tl.load(s_ptr + offs_n, mask=offs_n < N, other=0.0).to(_spark_tl.float32)
     acc = acc * s[None, :]
     o_ptrs = o_ptr + offs_b[:, None] * sob + offs_n[None, :] * son
-    _spark_tl.store(o_ptrs, acc, mask=(offs_b[:, None] < B) & (offs_n[None, :] < N))
+    # bf16 output matches the stock bf16 lm-head's logits dtype (F.linear keeps bf16);
+    # fp32 here would ~2x the logits buffer and inflate vLLM's profiled activation reserve.
+    _spark_tl.store(o_ptrs, acc.to(_spark_tl.bfloat16), mask=(offs_b[:, None] < B) & (offs_n[None, :] < N))
 
 
 def _spark_int8_gemm(hidden, w_int8, w_scale):
@@ -68,7 +70,7 @@ def _spark_int8_gemm(hidden, w_int8, w_scale):
     x = hidden.reshape(-1, K)
     B = x.shape[0]
     BLOCK_B = max(16, _spark_triton.next_power_of_2(B))
-    out = torch.empty(B, N, dtype=torch.float32, device=x.device)
+    out = torch.empty(B, N, dtype=torch.bfloat16, device=x.device)  # match stock bf16 logits
     xf = x.to(torch.float16)
     grid = ((N + 127) // 128,)
     _spark_k_int8[grid](xf, w_int8, w_scale, out, B, N, K,
