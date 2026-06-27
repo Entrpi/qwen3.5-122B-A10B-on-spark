@@ -70,8 +70,8 @@ python3 /host/patch_unify2.py || { [ "$NSPEC" = "0" ] && true; }
 # and <think> reasoning the qwen3 parser splits into `reasoning_content`. Verified:
 # tool_choice="auto" -> tool_calls=[get_weather {"city":"Paris"}]. Disable either with
 # TOOL_PARSER="" / REASONING_PARSER="", or override the name (e.g. qwen3_coder).
-TOOL_PARSER="${TOOL_PARSER:-qwen3_xml}"
-REASONING_PARSER="${REASONING_PARSER:-qwen3}"
+TOOL_PARSER="${TOOL_PARSER-qwen3_xml}"
+REASONING_PARSER="${REASONING_PARSER-qwen3}"
 TOOL_ARG=()
 [ -n "$TOOL_PARSER" ] && TOOL_ARG+=(--enable-auto-tool-choice --tool-call-parser "$TOOL_PARSER")
 [ -n "$REASONING_PARSER" ] && TOOL_ARG+=(--reasoning-parser "$REASONING_PARSER")
