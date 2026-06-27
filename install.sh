@@ -286,9 +286,19 @@ start_server() {
 
     log "Starting profile=$PROFILE (nspec=$nspec, ctx=$CTX, gpu-mem=$GPU_MEM) as container '$NAME' ..."
     docker rm -f "$NAME" >/dev/null 2>&1 || true
+    # vLLM's torch.compile cache isn't keyed on speculative depth: launching with a
+    # changed nspec against a stale cache crashes at load. Clear it when the spec
+    # signature (profile + nspec) changes from the last run.
+    local cache_root="$HF_HOME/.vllm_cache"
+    local sig_file="$cache_root/.spec_sig" sig="$PROFILE:$nspec"
+    if [[ -d "$cache_root/torch_compile_cache" && -f "$sig_file" && "$(cat "$sig_file" 2>/dev/null)" != "$sig" ]]; then
+        log "spec signature changed ($(cat "$sig_file") -> $sig); clearing stale torch_compile_cache"
+        rm -rf "$cache_root/torch_compile_cache" 2>/dev/null || true
+    fi
+    mkdir -p "$cache_root" 2>/dev/null && echo "$sig" > "$sig_file" 2>/dev/null || true
     # shellcheck disable=SC2086
     docker run -d --name "$NAME" --gpus all --net=host --ipc=host --ulimit memlock=-1:-1 \
-        -e HF_HOME=/hf -e VLLM_CACHE_ROOT=/hf/.vllm_cache -e MAX_MODEL_LEN="$CTX" -e GPU_MEM="$GPU_MEM" \
+        -e HF_HOME=/hf -e VLLM_CACHE_ROOT=/hf/.vllm_cache -e PORT="$PORT" -e MAX_MODEL_LEN="$CTX" -e GPU_MEM="$GPU_MEM" \
         -e MAX_NUM_SEQS="$MAX_NUM_SEQS" -e MAX_BATCHED_TOKENS="$MAX_BATCHED_TOKENS" ${HF_TOKEN:+-e HF_TOKEN="$HF_TOKEN"} \
         "${model_env[@]}" \
         -v "$HF_HOME:/hf" -v "$REPO_DIR/runtime:/host:ro" "${mounts[@]}" \
