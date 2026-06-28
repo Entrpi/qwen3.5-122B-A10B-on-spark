@@ -290,14 +290,15 @@ which no dense-weight quantization touches. For base / low-acceptance serving
 (`dense`), the stack is a real +28 %. Full derivation in
 [`docs/FINDINGS.md`](docs/FINDINGS.md).
 
-## Under the hood: the four runtime patches
+## Under the hood: the five runtime patches
 
 vLLM is unmodified on disk; [`runtime/serve.sh`](runtime/serve.sh) edits the
 installed package in-place before `vllm serve` (idempotent, sentinel-guarded):
 
 | Patch | Effect | Required by |
 |---|---|---|
-| [`patch_unify2.py`](runtime/patch_unify2.py) | scale-block KV-cache **unify** so the hybrid GDN+mamba target absorbs the drafter's attention spec (the upstream assert cannot); paired with `--no-enable-prefix-caching` to route to the no-hash-assert coordinator | DFlash (any spec profile) |
+| [`patch_unify2.py`](runtime/patch_unify2.py) | scale-block KV-cache **unify** so the hybrid GDN+mamba target absorbs the drafter's attention spec (the upstream assert cannot) | DFlash (any spec profile) |
+| [`patch_prefix_align.py`](runtime/patch_prefix_align.py) | makes `resolve_kv_cache_block_sizes`' mamba back-off **align-aware** so prefix caching coexists with DFlash (uses the GCD hash block size, 2240, instead of the LCM that fails the coordinator assert) | prefix caching ON (default) |
 | [`patch_inc_hybrid.py`](runtime/patch_inc_hybrid.py) | adds an `INCConfig.maybe_update_config` override that detects FP8 dense layers in the hybrid checkpoint and dispatches `Fp8LinearMethod` for `shared_expert` | `dense` |
 | [`patch_int8_lmhead_v3.py`](runtime/patch_int8_lmhead_v3.py) | replaces the lm-head matmul in `_get_logits` with a batched int8 w8a16 Triton GEMV (keeps the bf16 weight for the shared drafter) | `dense` |
 | [`patch_fla_shmem.py`](runtime/patch_fla_shmem.py) | allows the FLA GDN chunk kernels to use large tiles on sm121's 99 KiB shmem (prefill / TTFT only; harmless) | always (free) |

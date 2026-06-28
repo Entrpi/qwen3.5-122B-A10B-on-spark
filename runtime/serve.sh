@@ -76,6 +76,28 @@ TOOL_ARG=()
 [ -n "$TOOL_PARSER" ] && TOOL_ARG+=(--enable-auto-tool-choice --tool-call-parser "$TOOL_PARSER")
 [ -n "$REASONING_PARSER" ] && TOOL_ARG+=(--reasoning-parser "$REASONING_PARSER")
 
+# Prefix caching: ON by default; set PREFIX_CACHE=0 to disable. It is a clear win for agentic
+# multi-turn / long-context re-reads and neutral for single-turn c=1, so it is on by default.
+# Enabling it selects vLLM's HybridKVCacheCoordinator. With the DFlash drafter the
+# drafter's attention KV page is ~2x the target's, so vLLM's page-size unification scales the
+# target's mamba+attn block 2240->4480 to match it. That makes the (align-mode) mamba block
+# != cache_config.block_size, which trips resolve_kv_cache_block_sizes' back-off and forces
+# hash_block_size = LCM (4480); the drafter group stays at 2240, so the coordinator's
+# `block_size % hash_block_size` assert dies. patch_prefix_align.py makes that back-off
+# align-aware, so resolve uses the GCD (2240) — which divides every group (4480 and 2240) and
+# is the correct finer hash granularity (vLLM's intended hash_block_size<block_size design).
+# Validated 2026-06-28 on GB10: READY, DFlash accept ~7.7 tok/step on code, ~13x warm-prefix
+# TTFT (2.30s->0.18s), KV pool ~422k tokens (no regression). See docs/FINDINGS.md.
+PREFIX_CACHE="${PREFIX_CACHE:-1}"
+if [ "$PREFIX_CACHE" != "0" ]; then
+  echo "[serve] prefix caching ON (default) — applying align-aware hash_block_size fix"
+  python3 /host/patch_prefix_align.py
+  PREFIX_ARG=(--enable-prefix-caching)
+else
+  echo "[serve] prefix caching OFF (PREFIX_CACHE=0)"
+  PREFIX_ARG=(--no-enable-prefix-caching)
+fi
+
 exec vllm serve "$MODEL" \
   --served-model-name qwen \
   --host 0.0.0.0 --port "$PORT" \
@@ -83,7 +105,7 @@ exec vllm serve "$MODEL" \
   --max-num-seqs "$MAX_NUM_SEQS" \
   --max-num-batched-tokens "$MAX_BATCHED_TOKENS" \
   --gpu-memory-utilization "$GPU_MEM" \
-  --no-enable-prefix-caching \
+  "${PREFIX_ARG[@]}" \
   --enable-chunked-prefill \
   --trust-remote-code \
   --load-format "$LOAD_FORMAT" \

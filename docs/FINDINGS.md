@@ -32,13 +32,51 @@ the drafter's attention spec:
   makes the mamba group block ≠ cache block, tripping the coordinator hash
   assert. Omit it.
 - `--no-enable-prefix-caching` routes to `KVCacheCoordinatorNoPrefixCache`, which
-  has no line-504 hash assert. Prefix caching is irrelevant at c=1 anyway.
+  has no hash assert. It is the default; prefix caching is irrelevant at c=1
+  single-turn but a large win for agentic multi-turn / long-context re-reads —
+  see §1a for enabling it *with* DFlash.
 
 Working stack: `patch_unify2` + prefix-off + INT4 (bf16 KV) target + drafter
 pinned to `FLASH_ATTN`. **No FA4 shim needed** — vLLM gates FA4 to cap families
 90/100/110 (excludes 120), so the drafter runs FA2. (The whole fa4-sm120 saga is
 SGLang-only; SGLang's DFlash works too but its sm121 base decode is ~2× slower
 than vLLM's, so it loses on absolute throughput.)
+
+## 1a. Prefix caching + DFlash together (`PREFIX_CACHE=1`)
+
+Enabling `--enable-prefix-caching` *with* the DFlash drafter crashed engine init with
+`AssertionError: block_size must be divisible by hash_block_size`
+(`HybridKVCacheCoordinator.__init__`). Prefix caching alone (no DFlash) and DFlash alone
+both work; only the combination broke. Diagnosed on the GB10 (2026-06-28):
+
+- The DFlash drafter's attention layers carry a **2× larger KV page** (9 175 040 vs the
+  target's 4 587 520 B — the drafter has ~2× the KV heads). So the drafter is `max_page`.
+- `unify_kv_cache_spec_page_size` therefore **scales the *target's* mamba + attention block
+  2240 → 4480** (ratio 2) to match the drafter page; the drafter group stays at **2240**.
+- In `resolve_kv_cache_block_sizes` the (align-mode) mamba block is now 4480 ≠
+  `cache_config.block_size` (2240), so its **back-off branch** fires and forces
+  `hash_block_size = LCM = 4480`. The drafter group is 2240, and `2240 % 4480 ≠ 0` → assert.
+- But `GCD = 2240` divides **every** group (4480 and 2240) and is the correct finer hash
+  granularity (vLLM's `hash_block_size < block_size` merge-up, #29143). The back-off only
+  exists to disable fine hashing for *non-align* mamba — its `block_size != cache_block`
+  test is a **buggy proxy** that also trips when an align-mode block was merely scaled up.
+
+**Fix** ([`patch_prefix_align.py`](../runtime/patch_prefix_align.py)): make the back-off
+align-aware — only back off when `mamba_cache_mode != "align"`. In align mode it falls
+through to the GCD path. One-condition change; no drafter-geometry surgery, no extra memory.
+(vLLM #45181's pad-don't-scale path does *not* apply here: our pages are an exact 2×, so
+unify *scales* rather than pads — #45181 only adds a branch for the non-divisible case.)
+
+The KV reshape already reads padded/strided pages correctly in this image
+(`get_kv_cache_block_dim` → `physical_block_dim`), so there is **no acceptance risk** — the
+old 1.47-accept "pad" regression was a *different*, since-fixed reshape bug, not this path.
+
+Validated (prefix-ON + DFlash n=12, flash_attn): **READY**; **DFlash accept ~7.7 tok/step**
+on code (240 accepted / 36 drafts; per-position 34→11, unchanged from prefix-off);
+**warm-prefix TTFT 2.30 s → 0.18 s (~13×)** on a 4k shared prefix with a real
+`prefix_cache_hits_total` bump; coherent output; **KV pool 421 888 tokens** (≈ the prefix-off
+~427k, no regression). **On by default** (win for multi-turn / long-context, neutral for
+single-turn c=1); set `PREFIX_CACHE=0` to disable.
 
 ## 2. DFlash vs MTP — acceptance is task-dependent
 
