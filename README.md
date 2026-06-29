@@ -148,6 +148,14 @@ streams queue rather than fail) or a smaller `--ctx`.
 > [`scripts/monitor.sh`](scripts/monitor.sh) (OOM auto-kill guard) the first time
 > at any new `gpu-mem` or `ctx`.
 
+> **Seeing a smaller KV pool / less free memory than the numbers above?** The
+> Spark's 128 GB is *unified* — the GNOME desktop and maintenance daemons can hold
+> **~10–15 GiB** that would otherwise go to the KV cache. Drop to a headless
+> `multi-user.target` with
+> [**Entrpi/dgx-spark-serving-mode**](https://github.com/Entrpi/dgx-spark-serving-mode)
+> (`sudo serving-mode serve`) to hand that memory back to the model — it directly
+> raises the usable pool and context length.
+
 ### Startup time
 
 Time to READY is **~3 min** (vs ~12 min on the default loader). `--load-format
